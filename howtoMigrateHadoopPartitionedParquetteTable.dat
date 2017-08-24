@@ -1,0 +1,148 @@
+Migration of BIGSQL Hadoop Tables from DVT 3.0 in DVT BI 4.2 for parquette and partition table
+
+1. Login into 10.66.188.100  (source)
+2. suso su ctpadmin
+2.1 Create HDFS directory /user/ctpadmin/calib.db
+
+2.2 Create a bigsql non parquette, non partitioned table called 
+       CC_TIS_PARAM_DATA_NONPART_NONPARQ
+
+   CREATE HADOOP TABLE ctpadmin.CC_TIS_PARAM_DATA_NONPART_NONPARQ
+   (
+   INSRT_TS   BIGINT,
+   ESN       INT,
+   ADDR       INT,
+   TEL_TS   BIGINT,
+   PARAM_ID   INT,
+   HEX_VALUE       VARCHAR(250),
+   TEL_YEAR VARCHAR(4),TEL_DT VARCHAR(20))  as select * from cc_tis_param_data;
+   
+   4.2 Verify the tables has the same number of data as the original cc_tis_param_data
+    	Compare select count(*) from  ctpadmin.CC_TIS_PARAM_DATA_NONPART_NONPARQ; and 
+    	count(*) from  ctpadmin.CC_TIS_PARAM_DATA; 
+
+   4.3 Create a hive non parquette, non partitioned table called cc_tis_param_scaled_NONPART_NONPARQ
+      
+       
+       	use calib;
+		CREATE HADOOP TABLE cc_tis_param_temp
+		(
+		INSRT_TS   BIGINT,
+		ESN       INT,
+		ADDR       INT,
+		TEL_TS   BIGINT,
+		TEL_DT   VARCHAR(25),
+		PARAM_ID   INT,
+		HEX_VALUE       VARCHAR(250),
+		SCALED_VALUE VARCHAR(250)
+		) 
+		STORED AS PARQUETFILE;
+
+
+       	use calib;
+       	CREATE HADOOP TABLE c_tis_param_scaled_NONPART_NONPARQ
+       	(
+       	INSRT_TS   BIGINT,
+		ESN       INT,
+		ADDR       INT,
+		TEL_TS   BIGINT,
+		PARAM_ID   BIGINT,
+		HEX_VALUE       VARCHAR(250),
+		TEL_YEAR VARCHAR(4),
+		TEL_DT VARCHAR(20))
+		SCALED_VALUE VARCHAR(250)) as select * from ctpadmin.cc_tis_param_scaled;
+		
+		use calib;
+		CREATE HADOOP TABLE cc_tis_param_scaled
+		(
+		INSRT_TS   BIGINT,
+		ESN       INT,
+		ADDR       INT,
+		TEL_TS   BIGINT,
+		PARAM_ID   BIGINT,
+		HEX_VALUE       VARCHAR(250),
+		SCALED_VALUE VARCHAR(250)
+		) 
+		PARTITIONED BY (TEL_YEAR VARCHAR(10),TEL_DT VARCHAR(14))
+		STORED AS PARQUETFILE;
+		
+
+	4.2 Verify the tables has the same number of data as the original cc_tis_param_data
+    	Compare select count(*) from  ctpadmin.cc_tis_param_scaled_NONPART_NONPARQ; and 
+    	count(*) from ctpadmin.cc_tis_param_scaled; 
+3. Start Hive $HIVE_HOME/bin/hive. 
+4. There are 3 partitioned parquette tables to be migrated for Connected Calibration.
+
+  
+
+5. Export the tables locally in BI 3.0 cluster
+   Export table ctpadmin.CC_TIS_PARAM_DATA_NONPART_NONPARQ to 'hdfs:///user/ctpadmin/calib.db/CC_TIS_PARAM_DATA_NONPART_NONPARQ';
+   Export table ctpadmin.cc_tis_param_scaled_NONPART_NONPARQ to 'hdfs:///user/ctpadmin/calib.db/ctpadmin.cc_tis_param_scaled_NONPART_NONPARQ';
+
+       
+6. Copy the exported table file to the BI 4.2 cluster
+   hadoop distcp -pbupr -update /user/ctpadmin/calib.db/CC_TIS_PARAM_DATA_NONPART_NONPARQ/ webhdfs://sd20163linvdat-mgmt.cummins.com:14000/user/ctpdevadmin/calib.db/CC_TIS_PARAM_DATA_NONPART_NONPARQ/.
+   hadoop distcp -pbupr -update /user/ctpadmin/calib.db/cc_tis_param_scaled_NONPART_NONPARQ/ webhdfs://sd20163linvdat-mgmt.cummins.com:14000/user/ctpdevadmin/calib.db/cc_tis_param_scaled_NONPART_NONPARQ/.
+
+
+7.  Import the tables in the new BI 4.2 Cluster
+	
+	Login into 10.66.188.90 (edge Node) as ctpdevadmin
+    Start Hive
+    Import Table as hive table in calib schema
+    
+    use calib;
+    import table calib.CC_TIS_PARAM_DATA_NONPART_NONPARQ  from '/user/ctpdevadmin/calib.db/CC_TIS_PARAM_DATA_NONPART_NONPARQ ';
+    import table calib.cc_tis_param_scaled_NONPART_NONPARQ  from '/user/ctpdevadmin/calib.db/cc_tis_param_scaled_NONPART_NONPARQ ';
+
+8. Sync the Hive Catalog and BigsQL catalog
+   	In BI 4.2, Start Jsqsh
+   	Run the HCAT_SYNC_OBJECT command
+
+	[mdr-nosql-dvt.cummins.com][ctppdevadmin] 1> CALL SYSHADOOP.HCAT_SYNC_OBJECTS('calib','.*','a','REPLACE','CONTINUE');
+
+
+9. Create the required tables using parquette and partitioned
+
+	CREATE HADOOP calib.TABLE CC_TIS_PARAM_DATA
+	(
+ 	INSRT_TS   BIGINT,
+ 	ESN       INT,
+ 	ADDR       INT,
+ 	TEL_TS   BIGINT,
+ 	PARAM_ID   INT,
+ 	HEX_VALUE       VARCHAR(250)
+	) PARTITIONED BY (TEL_YEAR VARCHAR(4),TEL_DT VARCHAR(20))
+	STORED AS PARQUETFILE;
+	
+		CREATE HADOOP TABLE calib.cc_tis_param_scaled
+       	(
+       	INSRT_TS   BIGINT,
+		ESN       INT,
+		ADDR       INT,
+		TEL_TS   BIGINT,
+		PARAM_ID   BIGINT,
+		HEX_VALUE       VARCHAR(250),
+		SCALED_VALUE VARCHAR(250))
+		PARTITIONED BY (TEL_YEAR STRING,TEL_DT STRING)
+		STORED AS PARQUETFILE;
+	
+10. Verify the tables are accessible
+	select * from cc_tis_param_data;
+	select * from cc_tis_param_data;
+
+11. Insert data into newly created BigSQL tables
+
+	insert into CC_TIS_PARAM_DATA select * from calib.CC_TIS_PARAM_DATA_NONPART_NONPARQ;
+	insert into CC_TIS_PARAM_DATA select * from calib.cc_tis_param_scaled_NONPART_NONPARQ;
+
+12. Verify the number of records
+
+	select * from cc_tis_param_data;
+	select * from cc_tis_param_data;
+	
+13. Drop tables	
+ ctpadmin.cc_tis_param_scaled_NONPART_NONPARQ
+ ctpadmin.cc_tis_param_scaled_NONPART_NONPARQ
+ 
+	
